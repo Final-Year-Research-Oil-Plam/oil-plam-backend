@@ -1,61 +1,150 @@
 const { pool } = require('../config/db');
 
-// Add new tree
+/**
+ * POST /api/trees/add
+ * Add new tree to database
+ * - Validates blockId
+ * - Auto-generates tree_number
+ * - Maps camelCase → snake_case
+ */
 exports.addTree = async (req, res) => {
+  console.log('\n🌳 ============ ADD TREE REQUEST ============');
+  console.log('📦 Request Body:', JSON.stringify(req.body, null, 2));
+  console.log('⏰ Time:', new Date().toISOString());
+  
   try {
-    const { block, treeNumber, variety, plantedDate, notes } = req.body;
-    const userId = req.user?.id; // Assuming auth middleware adds user info
+    const {
+      blockId,
+      treeNumber,
+      latitude,
+      longitude,
+      placeId,
+      plantedDate,
+      age,
+      fertilizerType,
+      fertilizerQty,
+      lastFertilizerDate,
+      lastPruningDate,
+      lastWeedingDate
+    } = req.body;
 
-    // Validation
-    if (!block || !treeNumber) {
+    console.log('🔍 Checking blockId:', blockId);
+    
+    if (!blockId) {
+      console.log('❌ VALIDATION ERROR: Missing blockId');
       return res.status(400).json({
         success: false,
-        message: 'Block and tree number are required'
+        message: 'Block ID is required'
       });
     }
 
-    // Check if tree already exists
-    const [existingTree] = await pool.query(
-      'SELECT id FROM trees WHERE block = ? AND treeNumber = ?',
-      [block, treeNumber]
+    // Validate block exists
+    console.log('🔍 Validating block exists in database...');
+    const [blocks] = await pool.query(
+      'SELECT id FROM blocks WHERE id = ?',
+      [blockId]
     );
 
-    if (existingTree.length > 0) {
+    console.log('📊 Blocks found:', blocks.length);
+    if (blocks.length > 0) {
+      console.log('✅ Block validated:', blocks[0]);
+    }
+
+    if (blocks.length === 0) {
+      console.log('❌ VALIDATION ERROR: Block not found');
       return res.status(400).json({
         success: false,
-        message: 'Tree already exists in this block'
+        message: 'Block not found'
       });
     }
 
-    // Insert tree
+    // Auto-generate tree number if not provided
+    let finalTreeNumber = treeNumber;
+    if (!finalTreeNumber) {
+      console.log('🔢 Auto-generating tree number...');
+      const [lastTree] = await pool.query(
+        'SELECT tree_number FROM trees WHERE block_id = ? ORDER BY created_at DESC LIMIT 1',
+        [blockId]
+      );
+
+      console.log('📝 Last tree found:', lastTree.length > 0 ? lastTree[0].tree_number : 'None');
+      
+      const lastSeq = lastTree.length > 0
+        ? parseInt(lastTree[0].tree_number.split('-').pop(), 10)
+        : 0;
+
+      finalTreeNumber = `TREE-${blockId}-${String(lastSeq + 1).padStart(3, '0')}`;
+      console.log('✅ Generated tree number:', finalTreeNumber);
+    }
+
+    console.log('💾 Inserting tree into database...');
+    console.log('📊 Insert values:', {
+      blockId,
+      finalTreeNumber,
+      latitude: latitude || null,
+      longitude: longitude || null,
+      placeId: placeId || null,
+      plantedDate: plantedDate || null,
+      age: age || null,
+      fertilizerType: fertilizerType || null,
+      fertilizerQty: fertilizerQty || null,
+      lastFertilizerDate: lastFertilizerDate || null,
+      lastPruningDate: lastPruningDate || null,
+      lastWeedingDate: lastWeedingDate || null
+    });
+    
     const [result] = await pool.query(
-      'INSERT INTO trees (userId, block, treeNumber, variety, plantedDate, notes) VALUES (?, ?, ?, ?, ?, ?)',
-      [userId, block, treeNumber, variety || null, plantedDate || null, notes || null]
+      `INSERT INTO trees (
+        block_id, tree_number, latitude, longitude, place_id,
+        planted_date, age, fertilizer_type, fertilizer_qty,
+        last_fertilizer_date, last_pruning_date, last_weeding_date
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        blockId,
+        finalTreeNumber,
+        latitude || null,
+        longitude || null,
+        placeId || null,
+        plantedDate || null,
+        age || null,
+        fertilizerType || null,
+        fertilizerQty || null,
+        lastFertilizerDate || null,
+        lastPruningDate || null,
+        lastWeedingDate || null
+      ]
     );
+
+    console.log('✅ SUCCESS! Tree inserted with ID:', result.insertId);
+    console.log('============================================\n');
 
     res.status(201).json({
       success: true,
       message: 'Tree added successfully',
       data: {
         id: result.insertId,
-        block,
-        treeNumber,
-        variety,
-        plantedDate,
-        notes
+        treeNumber: finalTreeNumber,
+        blockId
       }
     });
+
   } catch (error) {
-    console.error('Add tree error:', error);
+    console.error('❌ ============ ERROR ============');
+    console.error('Error message:', error.message);
+    console.error('Error code:', error.code);
+    console.error('SQL State:', error.sqlState);
+    console.error('Full error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error. Please try again later.',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: 'Failed to add tree',
+      error: error.message
     });
   }
 };
 
-// Get tree by ID
+/**
+ * GET /api/trees/:treeId
+ */
 exports.getTree = async (req, res) => {
   try {
     const { treeId } = req.params;
@@ -80,32 +169,33 @@ exports.getTree = async (req, res) => {
     console.error('Get tree error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error. Please try again later.'
+      message: 'Server error'
     });
   }
 };
 
-// Search trees
+/**
+ * GET /api/trees
+ * Search trees
+ */
 exports.searchTree = async (req, res) => {
   try {
-    const { block, treeNumber, variety } = req.query;
+    const { blockId, treeNumber } = req.query;
+
     let query = 'SELECT * FROM trees WHERE 1=1';
     const params = [];
 
-    if (block) {
-      query += ' AND block = ?';
-      params.push(block);
+    if (blockId) {
+      query += ' AND block_id = ?';
+      params.push(blockId);
     }
 
     if (treeNumber) {
-      query += ' AND treeNumber = ?';
+      query += ' AND tree_number = ?';
       params.push(treeNumber);
     }
 
-    if (variety) {
-      query += ' AND variety = ?';
-      params.push(variety);
-    }
+    query += ' ORDER BY tree_number ASC';
 
     const [trees] = await pool.query(query, params);
 
@@ -118,16 +208,25 @@ exports.searchTree = async (req, res) => {
     console.error('Search tree error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error. Please try again later.'
+      message: 'Server error'
     });
   }
 };
 
-// Update tree
+/**
+ * PUT /api/trees/:treeId
+ * Update tree
+ */
 exports.updateTree = async (req, res) => {
   try {
     const { treeId } = req.params;
-    const { block, treeNumber, variety, plantedDate, notes } = req.body;
+    const {
+      blockId,
+      treeNumber,
+      plantedDate,
+      fertilizerType,
+      fertilizerQty
+    } = req.body;
 
     const [trees] = await pool.query(
       'SELECT id FROM trees WHERE id = ?',
@@ -142,32 +241,39 @@ exports.updateTree = async (req, res) => {
     }
 
     await pool.query(
-      'UPDATE trees SET block = ?, treeNumber = ?, variety = ?, plantedDate = ?, notes = ? WHERE id = ?',
-      [block, treeNumber, variety, plantedDate, notes, treeId]
+      `UPDATE trees SET
+        block_id = ?,
+        tree_number = ?,
+        planted_date = ?,
+        fertilizer_type = ?,
+        fertilizer_qty = ?
+       WHERE id = ?`,
+      [
+        blockId,
+        treeNumber,
+        plantedDate || null,
+        fertilizerType || null,
+        fertilizerQty || null,
+        treeId
+      ]
     );
 
     res.json({
       success: true,
-      message: 'Tree updated successfully',
-      data: {
-        id: treeId,
-        block,
-        treeNumber,
-        variety,
-        plantedDate,
-        notes
-      }
+      message: 'Tree updated successfully'
     });
   } catch (error) {
     console.error('Update tree error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error. Please try again later.'
+      message: 'Server error'
     });
   }
 };
 
-// Delete tree
+/**
+ * DELETE /api/trees/:treeId
+ */
 exports.deleteTree = async (req, res) => {
   try {
     const { treeId } = req.params;
@@ -184,7 +290,10 @@ exports.deleteTree = async (req, res) => {
       });
     }
 
-    await pool.query('DELETE FROM trees WHERE id = ?', [treeId]);
+    await pool.query(
+      'DELETE FROM trees WHERE id = ?',
+      [treeId]
+    );
 
     res.json({
       success: true,
@@ -194,7 +303,7 @@ exports.deleteTree = async (req, res) => {
     console.error('Delete tree error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error. Please try again later.'
+      message: 'Server error'
     });
   }
 };

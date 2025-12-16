@@ -46,6 +46,36 @@ async function initializeDatabase() {
   try {
     const connection = await pool.getConnection();
 
+    console.log('📋 [DB INIT] Creating/verifying database tables...');
+
+    // Blocks table - MUST BE CREATED FIRST (parent table)
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS blocks (
+        id VARCHAR(50) PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        area_size VARCHAR(50),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+    console.log('✅ [DB INIT] Blocks table created/verified');
+
+    // Check if blocks table has data
+    const [blockRows] = await connection.query('SELECT COUNT(*) as count FROM blocks');
+    console.log(`📊 [DB INIT] Blocks in database: ${blockRows[0].count}`);
+    
+    if (blockRows[0].count === 0) {
+      console.log('⚠️ [DB INIT] No blocks found! Inserting sample blocks...');
+      await connection.query(`
+        INSERT INTO blocks (id, name, area_size) VALUES
+        ('BLOCK-A', 'North Section A', '2.5 hectares'),
+        ('BLOCK-B', 'North Section B', '3.0 hectares'),
+        ('BLOCK-C', 'South Section A', '2.8 hectares'),
+        ('BLOCK-D', 'East Section', '4.2 hectares')
+      `);
+      console.log('✅ [DB INIT] Sample blocks inserted');
+    }
+
     // Users table
     await connection.query(`
       CREATE TABLE IF NOT EXISTS users (
@@ -57,23 +87,38 @@ async function initializeDatabase() {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
+    console.log('✅ [DB INIT] Users table created/verified');
 
-    // Trees table
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS trees (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        userId INT,
-        block VARCHAR(50) NOT NULL,
-        treeNumber VARCHAR(50) NOT NULL,
-        variety VARCHAR(100),
-        plantedDate DATE,
-        notes TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_tree (block, treeNumber),
-        FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    `);
+    // Trees table (updated schema with proper fields)
+    try {
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS trees (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          tree_number VARCHAR(50) NOT NULL UNIQUE,
+          block_id VARCHAR(50) NOT NULL COLLATE utf8mb4_0900_ai_ci,
+          latitude DECIMAL(10, 8) DEFAULT NULL,
+          longitude DECIMAL(11, 8) DEFAULT NULL,
+          place_id VARCHAR(255) DEFAULT NULL,
+          planted_date DATE DEFAULT NULL,
+          age INT DEFAULT NULL,
+          fertilizer_type VARCHAR(100) DEFAULT NULL,
+          fertilizer_qty VARCHAR(50) DEFAULT NULL,
+          last_fertilizer_date DATE DEFAULT NULL,
+          last_pruning_date DATE DEFAULT NULL,
+          last_weeding_date DATE DEFAULT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_block_id (block_id),
+          INDEX idx_tree_number (tree_number),
+          INDEX idx_planted_date (planted_date),
+          CONSTRAINT fk_block_trees FOREIGN KEY (block_id) REFERENCES blocks(id) ON DELETE RESTRICT ON UPDATE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+      console.log('✅ [DB INIT] Trees table created/verified');
+    } catch (treeError) {
+      console.error('❌ [DB INIT] Failed to create trees table:', treeError.message);
+      throw treeError;
+    }
 
     // Bunches table
     await connection.query(`
@@ -90,6 +135,7 @@ async function initializeDatabase() {
         FOREIGN KEY (treeId) REFERENCES trees(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
+    console.log('✅ [DB INIT] Bunches table created/verified');
 
     // Predictions table for disease detection
     await connection.query(`
@@ -106,8 +152,9 @@ async function initializeDatabase() {
         FOREIGN KEY (treeId) REFERENCES trees(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
+    console.log('✅ [DB INIT] Predictions table created/verified');
 
-    console.log('✅ Database tables initialized successfully!');
+    console.log('✅ [DB INIT] All database tables initialized successfully!');
     connection.release();
     return true;
   } catch (error) {
