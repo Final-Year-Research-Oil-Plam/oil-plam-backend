@@ -17,6 +17,7 @@ const authRoutes = require('./routes/auth');
 const treeRoutes = require('./routes/tree');
 const bunchRoutes = require('./routes/bunch');
 const blockRoutes = require('./routes/block');
+const qrRoutes = require('./routes/qr');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -35,6 +36,7 @@ app.use('/blocks', blockRoutes); // Direct /blocks route for frontend compatibil
 app.use('/api/blocks', blockRoutes); // Also available at /api/blocks
 app.use('/api/trees', treeRoutes);
 app.use('/api/bunches', bunchRoutes);
+app.use('/api/qr', qrRoutes); // QR code generation and public viewing
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

@@ -7,7 +7,7 @@ const envFile = process.env.NODE_ENV === 'production'
   ? '.env.production'
   : '.env.development';
 
-dotenv.config({ path: path.resolve(__dirname, envFile) });
+dotenv.config({ path: path.resolve(__dirname, '..', envFile) });
 
 console.log('📌 DB Config:');
 console.log('Host:', process.env.DB_HOST);
@@ -106,11 +106,16 @@ async function initializeDatabase() {
           last_fertilizer_date DATE DEFAULT NULL,
           last_pruning_date DATE DEFAULT NULL,
           last_weeding_date DATE DEFAULT NULL,
+          qr_token VARCHAR(255) UNIQUE DEFAULT NULL,
+          qr_generated_at TIMESTAMP NULL DEFAULT NULL,
+          last_scanned_at TIMESTAMP NULL DEFAULT NULL,
+          scan_count INT DEFAULT 0,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           INDEX idx_block_id (block_id),
           INDEX idx_tree_number (tree_number),
           INDEX idx_planted_date (planted_date),
+          INDEX idx_qr_token (qr_token),
           CONSTRAINT fk_block_trees FOREIGN KEY (block_id) REFERENCES blocks(id) ON DELETE RESTRICT ON UPDATE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
       `);
