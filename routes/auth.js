@@ -11,4 +11,12 @@ router.post('/register', registerController.register);
 // This route calls the login function to authenticate users
 router.post('/login', loginController.login);
 
+// ✅ GET /api/auth/users
+// Get all registered users
+router.get('/users', registerController.getAllUsers);
+
+// ✅ DELETE /api/auth/users/:id
+// Delete a user by ID
+router.delete('/users/:id', registerController.deleteUser);
+
 module.exports = router;
