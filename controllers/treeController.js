@@ -178,6 +178,46 @@ exports.getTree = async (req, res) => {
  * GET /api/trees
  * Search trees
  */
+/**
+ * GET /api/trees/by-block/:blockId
+ * Get trees for a specific block (for dropdown)
+ * Returns: { id, tree_number } only for dropdown efficiency
+ */
+exports.getTreesByBlock = async (req, res) => {
+  try {
+    const { blockId } = req.params;
+
+    if (!blockId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Block ID is required'
+      });
+    }
+
+    // Query only essential fields for dropdown
+    const [trees] = await pool.query(
+      'SELECT id, tree_number as treeNumber, block_id as blockId FROM trees WHERE block_id = ? ORDER BY tree_number ASC',
+      [blockId]
+    );
+
+    console.log(`✅ GET /trees by block ${blockId} - ${trees.length} trees found`);
+
+    res.json({
+      success: true,
+      message: 'Trees fetched successfully',
+      count: trees.length,
+      data: trees
+    });
+  } catch (error) {
+    console.error('❌ Error fetching trees by block:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch trees',
+      error: error.message
+    });
+  }
+};
+
 exports.searchTree = async (req, res) => {
   try {
     const { blockId, treeNumber } = req.query;

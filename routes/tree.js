@@ -8,6 +8,7 @@ router.get('/blocks', blockController.getAllBlocks); // GET /api/trees/blocks - 
 
 // Tree CRUD endpoints
 router.post('/add', treeController.addTree); // POST /api/trees/add - Add new tree
+router.get('/by-block/:blockId', treeController.getTreesByBlock); // GET /api/trees/by-block/:blockId - Get trees by block (for cascading dropdown)
 router.get('/', treeController.searchTree); // GET /api/trees - Search/list trees (must be before /:treeId)
 router.get('/:treeId', treeController.getTree); // GET /api/trees/:treeId - Get tree by ID
 router.put('/:treeId', treeController.updateTree); // PUT /api/trees/:treeId - Update tree

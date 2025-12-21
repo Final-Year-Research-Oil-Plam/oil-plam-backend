@@ -58,66 +58,79 @@ exports.addBunch = async (req, res) => {
 };
 
 // Predict bunch (disease detection)
+/**
+ * POST /api/bunches/predict
+ * Predict bunch count from uploaded image
+ * Request: multipart/form-data { image: File, blockId: string, treeId: string }
+ * Response: { success, message, data: { predictedBunches, confidence, timestamp } }
+ */
 exports.predictBunch = async (req, res) => {
   try {
-    const { block, treeId, bunchId } = req.body;
-    const photoPath = req.file ? req.file.path : null;
+    const { blockId, treeId } = req.body;
+    const imageFile = req.file;
 
     // Validation
-    if (!block || !treeId || !bunchId) {
+    if (!blockId || !treeId) {
       return res.status(400).json({
         success: false,
-        message: 'Block, tree ID, and bunch ID are required'
+        message: 'Block ID and Tree ID are required'
       });
     }
 
-    if (!photoPath) {
+    if (!imageFile) {
       return res.status(400).json({
         success: false,
-        message: 'Photo is required for prediction'
+        message: 'Image file is required for prediction'
       });
     }
 
-    // Check if bunch exists
-    const [bunches] = await pool.query(
-      'SELECT id FROM bunches WHERE id = ? AND treeId = ?',
-      [bunchId, treeId]
+    // Validate tree exists and belongs to the block
+    const [trees] = await pool.query(
+      'SELECT id, tree_number, block_id FROM trees WHERE id = ? AND block_id = ?',
+      [treeId, blockId]
     );
 
-    if (bunches.length === 0) {
+    if (trees.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Bunch not found'
+        message: 'Tree not found or does not belong to the specified block'
       });
     }
 
-    // TODO: Integrate with ML model for disease prediction
-    // For now, return mock prediction
+    const imagePath = imageFile.path;
+    console.log(`🔮 Predicting bunches for tree ${trees[0].tree_number} in block ${blockId}`);
+    console.log(`📸 Image path: ${imagePath}`);
+
+    // TODO: Call your FastAPI ML model here
+    // const mlResponse = await axios.post('http://localhost:8000/predict', {
+    //   image: imagePath,
+    //   blockId,
+    //   treeId
+    // });
+
+    // Mock prediction (replace with actual ML model call)
     const mockPrediction = {
-      healthy: 0.85,
-      diseased: 0.15,
-      confidence: 0.92
+      predictedBunches: Math.floor(Math.random() * 15) + 5, // 5-20 bunches
+      confidence: parseFloat((Math.random() * 0.3 + 0.7).toFixed(2)), // 0.70-1.00
+      timestamp: new Date().toISOString()
     };
 
     // Store prediction in database
-    const [result] = await pool.query(
-      'INSERT INTO predictions (bunchId, treeId, photoPath, prediction, confidence, predictionDate) VALUES (?, ?, ?, ?, ?, NOW())',
-      [bunchId, treeId, photoPath, JSON.stringify(mockPrediction), mockPrediction.confidence]
+    await pool.query(
+      `INSERT INTO predictions 
+       (tree_id, photo_path, predicted_bunches, confidence, prediction_date) 
+       VALUES (?, ?, ?, ?, NOW())`,
+      [treeId, imagePath, mockPrediction.predictedBunches, mockPrediction.confidence]
     );
 
-    res.status(201).json({
+    console.log(`✅ Prediction complete: ${mockPrediction.predictedBunches} bunches (${mockPrediction.confidence * 100}% confidence)`);
+
+    res.json({
       success: true,
-      message: 'Prediction completed successfully',
-      data: {
-        id: result.insertId,
-        block,
-        treeId,
-        bunchId,
-        photoPath,
-        prediction: mockPrediction,
-        confidence: mockPrediction.confidence
-      }
+      message: 'Prediction successful',
+      data: mockPrediction
     });
+
   } catch (error) {
     console.error('Predict bunch error:', error);
     res.status(500).json({

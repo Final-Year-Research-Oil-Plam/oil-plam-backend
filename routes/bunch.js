@@ -5,7 +5,7 @@ const bunchController = require('../controllers/bunchController');
 
 // Bunch endpoints
 router.post('/', upload.single('photo'), bunchController.addBunch);
-router.post('/predict', upload.single('photo'), bunchController.predictBunch);
+router.post('/predict', upload.single('image'), bunchController.predictBunch); // Changed 'photo' to 'image'
 router.get('/:bunchId', bunchController.getBunchData);
 router.get('/tree/:treeId', bunchController.getBunchesByTree);
 
