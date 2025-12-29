@@ -66,11 +66,26 @@ exports.addBunch = async (req, res) => {
  */
 exports.predictBunch = async (req, res) => {
   try {
+    console.log('🔮 === PREDICT BUNCH REQUEST ===');
+    console.log('📥 Request Body:', req.body);
+    console.log('📁 Request File:', req.file ? {
+      fieldname: req.file.fieldname,
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size,
+      cloudinaryPath: req.file.path
+    } : 'No file received');
+    console.log('🌐 Headers:', {
+      'content-type': req.headers['content-type'],
+      'content-length': req.headers['content-length']
+    });
+
     const { blockId, treeId } = req.body;
     const imageFile = req.file;
 
     // Validation
     if (!blockId || !treeId) {
+      console.log('❌ Missing required fields:', { blockId, treeId });
       return res.status(400).json({
         success: false,
         message: 'Block ID and Tree ID are required'
@@ -78,9 +93,28 @@ exports.predictBunch = async (req, res) => {
     }
 
     if (!imageFile) {
+      console.log('❌ No image file received in request');
       return res.status(400).json({
         success: false,
         message: 'Image file is required for prediction'
+      });
+    }
+
+    // console.log('📸 Image file details:', {
+    //   fieldname: imageFile.fieldname,
+    //   originalname: imageFile.originalname,
+    //   mimetype: imageFile.mimetype,
+    //   size: imageFile.size,
+    //   path: imageFile.path ? 'Cloudinary URL received' : 'No path - upload failed'
+    // });
+
+    // Check if Cloudinary upload was successful
+    if (!imageFile.path) {
+      console.log('❌ Cloudinary upload failed - no path returned');
+      console.log('🔧 Check environment variables: CLOUDINARY_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET');
+      return res.status(500).json({
+        success: false,
+        message: 'Image upload to cloud storage failed. Please check server configuration.'
       });
     }
 
@@ -97,13 +131,27 @@ exports.predictBunch = async (req, res) => {
       });
     }
 
-    const imagePath = imageFile.path;
+    // Get Cloudinary URL (uploaded by middleware)
+    const cloudinaryUrl = imageFile.path;
     console.log(`🔮 Predicting bunches for tree ${trees[0].tree_number} in block ${blockId}`);
-    console.log(`📸 Image path: ${imagePath}`);
+    console.log(`📸 Cloudinary URL: ${cloudinaryUrl}`);
+
+    // Generate unique bunch number
+    const bunchNumber = `BUNCH-${trees[0].tree_number}-${Date.now()}`;
+
+    // 1. First, create a bunch record in the bunches table
+    const [bunchResult] = await pool.query(
+      `INSERT INTO bunches (treeId, bunchNumber, stage, photoPath, created_at) 
+       VALUES (?, ?, 'prediction', ?, NOW())`,
+      [treeId, bunchNumber, cloudinaryUrl]
+    );
+
+    const bunchId = bunchResult.insertId;
+    console.log(`✅ Bunch created with ID: ${bunchId}, Number: ${bunchNumber}`);
 
     // TODO: Call your FastAPI ML model here
     // const mlResponse = await axios.post('http://localhost:8000/predict', {
-    //   image: imagePath,
+    //   image: cloudinaryUrl,
     //   blockId,
     //   treeId
     // });
@@ -115,28 +163,52 @@ exports.predictBunch = async (req, res) => {
       timestamp: new Date().toISOString()
     };
 
-    // Store prediction in database
+    // 2. Store prediction in database with proper foreign keys
     await pool.query(
       `INSERT INTO predictions 
-       (tree_id, photo_path, predicted_bunches, confidence, prediction_date) 
-       VALUES (?, ?, ?, ?, NOW())`,
-      [treeId, imagePath, mockPrediction.predictedBunches, mockPrediction.confidence]
+       (bunchId, treeId, photoPath, prediction, confidence, predictionDate) 
+       VALUES (?, ?, ?, ?, ?, NOW())`,
+      [bunchId, treeId, cloudinaryUrl, JSON.stringify(mockPrediction), mockPrediction.confidence]
     );
 
     console.log(`✅ Prediction complete: ${mockPrediction.predictedBunches} bunches (${mockPrediction.confidence * 100}% confidence)`);
 
     res.json({
       success: true,
-      message: 'Prediction successful',
-      data: mockPrediction
+      message: 'Bunch created and prediction successful',
+      data: {
+        bunchId: bunchId,
+        bunchNumber: bunchNumber,
+        treeNumber: trees[0].tree_number,
+        cloudinaryUrl: cloudinaryUrl,
+        ...mockPrediction
+      }
     });
 
   } catch (error) {
-    console.error('Predict bunch error:', error);
+    console.error('❌ === PREDICT BUNCH ERROR ===');
+    console.error('Error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
+    
+    // Check if it's a Cloudinary-related error
+    if (error.message.includes('cloudinary') || error.message.includes('upload')) {
+      console.error('🚨 Cloudinary configuration issue detected!');
+      console.error('💡 Check that these environment variables are set:');
+      console.error('   - CLOUDINARY_NAME');
+      console.error('   - CLOUDINARY_API_KEY');
+      console.error('   - CLOUDINARY_API_SECRET');
+    }
+
     res.status(500).json({
       success: false,
-      message: 'Server error. Please try again later.',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: 'Server error during prediction. Please try again later.',
+      error: process.env.NODE_ENV === 'development' ? {
+        message: error.message,
+        type: error.name
+      } : undefined
     });
   }
 };

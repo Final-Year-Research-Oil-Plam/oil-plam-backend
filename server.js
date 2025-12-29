@@ -11,6 +11,15 @@ const envFile = process.env.NODE_ENV === 'production'
 
 dotenv.config({ path: path.resolve(__dirname, envFile) });
 
+// Debug: Check if Cloudinary environment variables are loaded
+console.log('🔧 Environment Variables Check:', {
+  NODE_ENV: process.env.NODE_ENV,
+  envFile: envFile,
+  CLOUDINARY_NAME: process.env.CLOUDINARY_NAME ? '✅ Loaded' : '❌ Missing',
+  CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY ? '✅ Loaded' : '❌ Missing',
+  CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET ? '✅ Loaded' : '❌ Missing'
+});
+
 
 const { testConnection, initializeDatabase } = require('./config/db');
 const authRoutes = require('./routes/auth');
@@ -18,6 +27,8 @@ const treeRoutes = require('./routes/tree');
 const bunchRoutes = require('./routes/bunch');
 const blockRoutes = require('./routes/block');
 const qrRoutes = require('./routes/qr');
+const predictRoutes = require('./routes/predict');
+const predictExampleRoutes = require('./routes/predict-examples');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -37,6 +48,8 @@ app.use('/api/blocks', blockRoutes); // Also available at /api/blocks
 app.use('/api/trees', treeRoutes);
 app.use('/api/bunches', bunchRoutes);
 app.use('/api/qr', qrRoutes); // QR code generation and public viewing
+app.use('/api/predict', predictRoutes);
+// app.use('/api/predict-examples', predictExampleRoutes); // Example prediction endpoints for development
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
