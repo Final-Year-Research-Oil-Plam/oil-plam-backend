@@ -212,6 +212,245 @@ class PredictController {
     }
   }
 
+  // Get all predictions for dashboard with pagination
+  static async getAllPredictions(req, res) {
+    try {
+      const { page = 1, limit = 10, status, blockId } = req.query;
+      const offset = (page - 1) * limit;
+      
+      let whereClause = 'WHERE 1=1';
+      let queryParams = [];
+      
+      if (status) {
+        whereClause += ' AND p.status = ?';
+        queryParams.push(status);
+      }
+      
+      if (blockId) {
+        whereClause += ' AND bl.id = ?';
+        queryParams.push(blockId);
+      }
+      
+      // Get total count
+      const [countRows] = await pool.query(`
+        SELECT COUNT(*) as total 
+        FROM predictions p
+        JOIN bunches b ON p.bunchId = b.id
+        JOIN trees t ON p.treeId = t.id
+        JOIN blocks bl ON t.block_id = bl.id
+        ${whereClause}
+      `, queryParams);
+      
+      const total = countRows[0].total;
+      
+      // Get paginated results
+      const [rows] = await pool.query(`
+        SELECT 
+          p.id as predictionId,
+          p.prediction,
+          p.confidence,
+          p.predictionDate,
+          p.created_at,
+          p.photoPath,
+          b.id as bunchId,
+          b.bunchNumber,
+          b.stage,
+          b.weight,
+          b.notes,
+          t.id as treeId,
+          t.tree_number,
+          bl.id as block_id,
+          bl.name as block_name
+        FROM predictions p
+        JOIN bunches b ON p.bunchId = b.id
+        JOIN trees t ON p.treeId = t.id
+        JOIN blocks bl ON t.block_id = bl.id
+        ${whereClause}
+        ORDER BY p.created_at DESC
+        LIMIT ? OFFSET ?
+      `, [...queryParams, parseInt(limit), parseInt(offset)]);
+
+      res.json({
+        success: true,
+        data: rows,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / limit)
+        }
+      });
+
+    } catch (error) {
+      console.error('Get all predictions error:', error.message);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get predictions',
+        error: error.message
+      });
+    }
+  }
+
+  // Get recent predictions for dashboard overview
+  static async getRecentPredictions(req, res) {
+    try {
+      const { limit = 5 } = req.query;
+      
+      const [rows] = await pool.query(`
+        SELECT 
+          p.id as predictionId,
+          p.prediction,
+          p.confidence,
+          p.created_at,
+          p.photoPath,
+          b.bunchNumber,
+          t.tree_number,
+          bl.name as block_name
+        FROM predictions p
+        JOIN bunches b ON p.bunchId = b.id
+        JOIN trees t ON p.treeId = t.id
+        JOIN blocks bl ON t.block_id = bl.id
+        ORDER BY p.created_at DESC
+        LIMIT ?
+      `, [parseInt(limit)]);
+
+      res.json({
+        success: true,
+        data: rows
+      });
+
+    } catch (error) {
+      console.error('Get recent predictions error:', error.message);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get recent predictions',
+        error: error.message
+      });
+    }
+  }
+
+  // Get prediction statistics for dashboard
+  static async getPredictionStats(req, res) {
+    try {
+      const [stats] = await pool.query(`
+        SELECT 
+          COUNT(*) as totalPredictions,
+          AVG(CASE WHEN confidence IS NOT NULL THEN confidence ELSE 0 END) as avgConfidence,
+          COUNT(DISTINCT DATE(created_at)) as activeDays
+        FROM predictions
+        WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+      `);
+
+      res.json({
+        success: true,
+        data: stats[0]
+      });
+
+    } catch (error) {
+      console.error('Get prediction stats error:', error.message);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get prediction statistics',
+        error: error.message
+      });
+    }
+  }
+
+  // Get bunches by tree ID for bunch management
+  static async getBunchesByTree(req, res) {
+    try {
+      const { treeId } = req.params;
+      
+      const [rows] = await pool.query(`
+        SELECT 
+          b.id as bunchId,
+          b.bunchNumber,
+          b.stage,
+          b.weight,
+          b.photoPath,
+          b.notes,
+          b.created_at,
+          t.tree_number,
+          bl.name as block_name,
+          p.id as predictionId,
+          p.prediction,
+          p.confidence,
+          p.predictionDate
+        FROM bunches b
+        JOIN trees t ON b.treeId = t.id
+        JOIN blocks bl ON t.block_id = bl.id
+        LEFT JOIN predictions p ON b.id = p.bunchId
+        WHERE b.treeId = ?
+        ORDER BY b.created_at DESC
+      `, [treeId]);
+
+      res.json({
+        success: true,
+        data: rows
+      });
+
+    } catch (error) {
+      console.error('Get bunches by tree error:', error.message);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get bunches',
+        error: error.message
+      });
+    }
+  }
+
+  // Get detailed prediction by prediction ID
+  static async getPredictionDetail(req, res) {
+    try {
+      const { predictionId } = req.params;
+      
+      const [rows] = await pool.query(`
+        SELECT 
+          p.id as predictionId,
+          p.prediction,
+          p.confidence,
+          p.predictionDate,
+          p.created_at,
+          p.photoPath,
+          b.id as bunchId,
+          b.bunchNumber,
+          b.stage,
+          b.weight,
+          b.notes,
+          b.created_at as bunchCreatedAt,
+          t.id as treeId,
+          t.tree_number,
+          t.block_id,
+          bl.name as block_name
+        FROM predictions p
+        JOIN bunches b ON p.bunchId = b.id
+        JOIN trees t ON p.treeId = t.id
+        JOIN blocks bl ON t.block_id = bl.id
+        WHERE p.id = ?
+      `, [predictionId]);
+
+      if (rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Prediction not found'
+        });
+      }
+
+      res.json({
+        success: true,
+        data: rows[0]
+      });
+
+    } catch (error) {
+      console.error('Get prediction detail error:', error.message);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get prediction details',
+        error: error.message
+      });
+    }
+  }
+
   // Get prediction by bunch ID
   static async getPrediction(req, res) {
     try {
