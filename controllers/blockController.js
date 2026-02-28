@@ -7,20 +7,32 @@ const { pool } = require('../config/db');
  */
 exports.getAllBlocks = async (req, res) => {
   try {
+    console.log('\n🔄 ========== GET /api/blocks REQUEST ==========');
+    console.log('⏰ Timestamp:', new Date().toISOString());
+    console.log('📱 Client IP:', req.ip || req.connection.remoteAddress);
+    console.log('🌍 Full URL:', `${req.protocol}://${req.get('host')}${req.originalUrl}`);
+    
     // Query blocks table and map snake_case to camelCase for frontend
     const [blocks] = await pool.query(
       'SELECT id, name, area_size as areaSize FROM blocks ORDER BY id ASC'
     );
     
-    console.log(`✅ GET /blocks - ${blocks.length} blocks found`);
+    console.log(`✅ Database Query Successful - Found ${blocks.length} blocks`);
+    console.log('📊 Block Data:', JSON.stringify(blocks, null, 2));
     
-    res.json({
+    const response = {
       success: true,
       message: 'Blocks fetched successfully',
       data: blocks
-    });
+    };
+    
+    console.log('📤 Sending Response:', JSON.stringify(response, null, 2));
+    console.log('✅ GET /api/blocks - ${blocks.length} blocks found\n');
+    
+    res.json(response);
   } catch (error) {
     console.error('❌ Error fetching blocks:', error.message);
+    console.error('   Stack:', error.stack);
     
     res.status(500).json({
       success: false,

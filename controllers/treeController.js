@@ -187,12 +187,20 @@ exports.getTreesByBlock = async (req, res) => {
   try {
     const { blockId } = req.params;
 
+    console.log('\n🌲 ========== GET /api/trees/by-block/:blockId REQUEST ==========');
+    console.log('⏰ Timestamp:', new Date().toISOString());
+    console.log('📝 Block ID Requested:', blockId);
+    console.log('📱 Client IP:', req.ip || req.connection.remoteAddress);
+
     if (!blockId) {
+      console.log('❌ VALIDATION ERROR: Block ID is missing');
       return res.status(400).json({
         success: false,
         message: 'Block ID is required'
       });
     }
+
+    console.log('✅ Block ID validated');
 
     // Query only essential fields for dropdown
     const [trees] = await pool.query(
@@ -200,16 +208,23 @@ exports.getTreesByBlock = async (req, res) => {
       [blockId]
     );
 
-    console.log(`✅ GET /trees by block ${blockId} - ${trees.length} trees found`);
+    console.log(`✅ Database Query Successful - Found ${trees.length} trees`);
+    console.log('📊 Trees Data:', JSON.stringify(trees, null, 2));
 
-    res.json({
+    const response = {
       success: true,
       message: 'Trees fetched successfully',
       count: trees.length,
       data: trees
-    });
+    };
+
+    console.log('📤 Sending Response:', JSON.stringify(response, null, 2));
+    console.log(`✅ GET /trees/by-block/${blockId} - ${trees.length} trees found\n`);
+
+    res.json(response);
   } catch (error) {
     console.error('❌ Error fetching trees by block:', error.message);
+    console.error('   Stack:', error.stack);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch trees',
