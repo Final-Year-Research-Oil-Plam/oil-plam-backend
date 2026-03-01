@@ -45,7 +45,18 @@ class PredictController {
       console.log('✅ Tree validated:', tree.tree_number, 'in block:', blockId);
 
       // 3️⃣ Get Cloudinary URL (generated automatically by middleware)
-      const imageUrl = req.file.path;
+      console.log('📁 Uploaded file object properties:', Object.keys(req.file));
+      console.log('📁 Full file object:', JSON.stringify(req.file, null, 2));
+      
+      // Cloudinary storage can return path in different properties
+      const imageUrl = req.file.path || req.file.secure_url || req.file.url || req.file.cloudinaryPath;
+      
+      if (!imageUrl) {
+        console.error('❌ ERROR: No Cloudinary URL found in uploaded file!');
+        console.error('📁 Available file properties:', Object.keys(req.file));
+        throw new Error('Image upload failed - no URL returned from Cloudinary');
+      }
+      
       console.log('📷 Image uploaded to Cloudinary:', imageUrl);
 
       // 4️⃣ Create bunch record in database
@@ -61,8 +72,8 @@ class PredictController {
 
       // 5️⃣ Create prediction record (status: pending)
       const [predictionResult] = await connection.query(`
-        INSERT INTO predictions (bunchId, treeId, photoPath, status, created_at)
-        VALUES (?, ?, ?, 'pending', NOW())
+        INSERT INTO predictions (bunchId, treeId, photoPath , created_at)
+        VALUES (?, ?, ?, NOW())
       `, [bunchId, treeId, imageUrl]);
 
       const predictionId = predictionResult.insertId;
@@ -71,38 +82,82 @@ class PredictController {
       // 6️⃣ Send image URL to ML model
       let mlResponse = null;
       let predictionStatus = 'completed';
-      let errorMessage = null;
+
 
       try {
         console.log('🤖 Sending to ML model...');
-        mlResponse = await this.callMLModel(imageUrl);
-        console.log('✅ ML prediction completed:', mlResponse);
+        mlResponse = await PredictController.callMLModel(imageUrl);
 
-        // 7️⃣ Update prediction with ML results
-        await connection.query(`
-          UPDATE predictions 
-          SET prediction = ?, confidence = ?, disease_type = ?, 
-              severity_level = ?, recommendations = ?, status = 'completed',
-              predictionDate = NOW()
-          WHERE id = ?
-        `, [
-          JSON.stringify(mlResponse.prediction),
-          mlResponse.confidence,
-          mlResponse.disease_type,
-          mlResponse.severity_level,
-          mlResponse.recommendations,
-          predictionId
-        ]);
+        // Check if detection was successful
+        if (!mlResponse.success || mlResponse.count === 0) {
+          console.warn('⚠️ No bunch detected in image');
+          predictionStatus = 'completed_no_detection';
+          await connection.query(`
+            UPDATE predictions 
+            SET bunchCount = 0, 
+                bunchCoordinates = NULL, 
+                bunchClass = NULL, 
+                classConfidence = NULL, 
+                harvestDay = NULL,
+                prediction = ?,
+                confidence = 0,
+                predictionDate = NOW()
+            WHERE id = ?
+          `, [JSON.stringify(mlResponse), predictionId]);
+        } else {
+          // 7️⃣ Update prediction with ML results (successful detection)
+          console.log('✅ Bunch detected! Details:', {
+            count: mlResponse.count,
+            class: mlResponse.class,
+            confidence: mlResponse.confidence,
+            final_date: mlResponse.final_date
+          });
+          
+          await connection.query(`
+            UPDATE predictions 
+            SET bunchCount = ?, 
+                bunchCoordinates = ?, 
+                bunchClass = ?, 
+                classConfidence = ?, 
+                harvestDay = ?,
+                prediction = ?,
+                confidence = ?,
+                predictionDate = NOW()
+            WHERE id = ?
+          `, [
+            mlResponse.count,
+            JSON.stringify(mlResponse.coordinates),
+            mlResponse.class,
+            mlResponse.confidence,
+            mlResponse.final_date,
+            JSON.stringify(mlResponse),
+            mlResponse.confidence,
+            predictionId
+          ]);
+        }
 
       } catch (mlError) {
         console.error('❌ ML Model Error:', mlError.message);
+        
+        // Log detailed error information
+        if (mlError.response) {
+          console.error('❌ ML Response Status:', mlError.response.status);
+          console.error('❌ ML Response Data:', JSON.stringify(mlError.response.data, null, 2));
+        } else if (mlError.code) {
+          console.error('❌ Network Error Code:', mlError.code);
+          console.error('❌ Message:', mlError.message);
+        }
+        
         predictionStatus = 'failed';
         errorMessage = mlError.message;
 
         // Update prediction status to failed
         await connection.query(`
-          UPDATE predictions SET status = 'failed' WHERE id = ?
-        `, [predictionId]);
+          UPDATE predictions SET status = 'failed', prediction = ?, predictionDate = NOW() WHERE id = ?
+        `, [
+          JSON.stringify({ error: mlError.message, success: false }),
+          predictionId
+        ]);
 
         // Use mock data for development
         mlResponse = {
@@ -125,6 +180,15 @@ class PredictController {
         blockId,
         imageUrl,
         status: predictionStatus,
+        // YOLO Detection & Classification Results
+        bunchCount: mlResponse.count || 0,
+        bunchCoordinates: mlResponse.coordinates || [],
+        bunchClass: mlResponse.class || null,
+        classConfidence: mlResponse.confidence || 0,
+        harvestDay: mlResponse.final_date || null,
+        detectionSuccess: mlResponse.success || false,
+        mlMessage: mlResponse.message || 'Unknown result',
+        // Legacy prediction field
         prediction: mlResponse
       };
 
@@ -133,7 +197,16 @@ class PredictController {
           success: true,
           message: "Bunch created successfully but prediction failed",
           data: responseData,
-          warning: "Prediction service is currently unavailable"
+          warning: "Prediction service is currently unavailable. Please check ML server."
+        });
+      }
+
+      if (predictionStatus === 'completed_no_detection') {
+        return res.status(201).json({
+          success: true,
+          message: "Image analyzed but no bunch detected",
+          data: responseData,
+          warning: "No bunch was detected in the image. Please retake photo with clearer bunch view."
         });
       }
 
@@ -160,8 +233,8 @@ class PredictController {
 
   // Helper method to call ML model with proper error handling
   static async callMLModel(imageUrl) {
-    const ML_API_ENDPOINT = process.env.ML_API_ENDPOINT || 'http://localhost:5000/predict';
-    const ML_API_KEY = process.env.ML_API_KEY; // Add your ML API key
+    const ML_API_ENDPOINT = process.env.ML_API_ENDPOINT || 'http://localhost:8000/palm/detect-from-url';
+    const ML_API_KEY = process.env.ML_API_KEY; // Optional API key for security
     
     try {
       const headers = {
@@ -171,40 +244,59 @@ class PredictController {
       // Add API key to headers if provided
       if (ML_API_KEY) {
         headers['Authorization'] = `Bearer ${ML_API_KEY}`;
-        // or use: headers['X-API-Key'] = ML_API_KEY;
-        // depending on your ML service requirements
       }
+
+      console.log('🤖 Calling ML Model:', ML_API_ENDPOINT);
+      console.log('📸 Image URL:', imageUrl);
+      console.log('📋 Request payload:', JSON.stringify({ image_url: imageUrl }, null, 2));
 
       const response = await axios.post(ML_API_ENDPOINT, {
         image_url: imageUrl
       }, {
-        timeout: 30000, // 30 seconds timeout
+        timeout: 60000, // 60 seconds timeout for model inference
         headers
       });
+      
+      console.log('✅ ML Response received:', JSON.stringify(response.data, null, 2));
 
-      // Process ML response
+      console.log('✅ ML Response received:', JSON.stringify(response.data, null, 2));
+
+      // Parse YOLO response
       return {
-        prediction: response.data.prediction || response.data,
-        confidence: response.data.confidence || 0.85,
-        disease_type: response.data.disease_type || 'Healthy',
-        severity_level: response.data.severity_level || 'Low',
-        recommendations: response.data.recommendations || 'No immediate action required'
+        success: response.data.success,
+        message: response.data.message,
+        count: response.data.count,
+        coordinates: response.data.coordinates || [],
+        class: response.data.class, // 'ripe' or 'unripe'
+        confidence: response.data.confidence,
+        final_date: response.data.final_date // e.g., "Day 12"
       };
 
     } catch (error) {
+      console.error('❌ ML Model Error:', error.message);
+      
+      // Show detailed error response from ML if available
+      if (error.response) {
+        console.error('❌ ML Response Status:', error.response.status);
+        console.error('❌ ML Response Data:', JSON.stringify(error.response.data, null, 2));
+      }
+      console.error('❌ Full Error Details:', {
+        message: error.message,
+        code: error.code,
+        errno: error.errno
+      });
+      
       // For development, return mock data when ML service is unavailable
       if (process.env.NODE_ENV === 'development') {
         console.log('🧪 ML service unavailable, using mock data for development');
         return {
-          prediction: { 
-            status: 'healthy', 
-            class: 'fresh_bunch',
-            mock: true 
-          },
+          success: true,
+          message: 'Object detected (Mock Response)',
+          count: 1,
+          coordinates: [{ x1: 150, y1: 200, x2: 450, y2: 600 }],
+          class: 'ripe',
           confidence: 0.92,
-          disease_type: 'None',
-          severity_level: 'N/A',
-          recommendations: 'Bunch appears healthy and ready for harvest (Mock Response)'
+          final_date: 'Day 12'
         };
       }
       
