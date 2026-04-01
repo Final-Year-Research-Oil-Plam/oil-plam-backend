@@ -158,10 +158,23 @@ CREATE TABLE IF NOT EXISTS predictions (
   bunchId INT NOT NULL COMMENT 'Foreign key to bunches table',
   treeId INT NOT NULL COMMENT 'Foreign key to trees table',
   
-  -- Prediction Information
+  -- Image Information
   photoPath VARCHAR(255) DEFAULT NULL COMMENT 'Path to analyzed photo',
+  
+  -- YOLO Detection Results
+  bunchCount INT DEFAULT NULL COMMENT 'Number of bunches detected in image',
+  bunchCoordinates JSON DEFAULT NULL COMMENT 'Bounding box coordinates [x1, y1, x2, y2]',
+  
+  -- Classification Results
+  bunchClass VARCHAR(50) DEFAULT NULL COMMENT 'Bunch class (ripe or unripe)',
+  classConfidence DECIMAL(5, 2) DEFAULT NULL COMMENT 'Classification confidence (0-100)',
+  
+  -- Ripeness Prediction
+  harvestDay VARCHAR(50) DEFAULT NULL COMMENT 'Predicted harvest day (2d-16d format)',
+  
+  -- Legacy fields (kept for backward compatibility)
   prediction JSON DEFAULT NULL COMMENT 'Prediction results as JSON object',
-  confidence DECIMAL(5, 2) DEFAULT NULL COMMENT 'Prediction confidence (0-100)',
+  confidence DECIMAL(5, 2) DEFAULT NULL COMMENT 'Overall prediction confidence (0-100)',
   
   -- Timestamps
   predictionDate TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'When prediction was made',
@@ -171,7 +184,8 @@ CREATE TABLE IF NOT EXISTS predictions (
   INDEX idx_bunch_id (bunchId),
   INDEX idx_tree_id (treeId),
   INDEX idx_prediction_date (predictionDate),
-  INDEX idx_confidence (confidence),
+  INDEX idx_bunch_class (bunchClass),
+  INDEX idx_harvest_day (harvestDay),
   
   -- Foreign key constraints
   CONSTRAINT fk_bunch_predictions 
@@ -185,7 +199,7 @@ CREATE TABLE IF NOT EXISTS predictions (
     ON DELETE CASCADE
     
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='AI/ML predictions for disease detection and ripeness';
+COMMENT='AI/ML predictions for ripeness detection and harvest timing';
 
 -- ===================================================================
 -- SAMPLE DATA FOR TESTING (Optional)
