@@ -250,6 +250,7 @@ class PredictController {
       console.log('📸 Image URL:', imageUrl);
       console.log('📋 Request payload:', JSON.stringify({ image_url: imageUrl }, null, 2));
 
+      //Request and response path from backend API to FastAPI ML model
       const response = await axios.post(ML_API_ENDPOINT, {
         image_url: imageUrl
       }, {
